@@ -670,7 +670,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Ok(warp::reply::with_status(warp::reply::json(&ApiError::from_str("internal server error")), warp::http::StatusCode::INTERNAL_SERVER_ERROR))
             }
         }).with(cors);
-        warp::serve(route).run(([0, 0, 0, 0], env::var("PORT")?.parse::<u16>()?)).await;
+        warp::serve(route).run(([127, 0, 0, 1], env::var("PORT")?.parse::<u16>()?)).await;
         borrowed_pool.close().await;
     Ok(())
 }
