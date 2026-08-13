@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.104"
 argon2 = { version = "0.5.3", features = ["std"] }
 base64 = "0.22.1"
 bytes = "1.11.1"

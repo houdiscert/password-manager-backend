@@ -13,9 +13,10 @@ use snowflaked::sync::Generator;
 use sqlx::MySqlPool;
 use warp::{Filter, filters::body::BodyDeserializeError, reject::{InvalidHeader, MethodNotAllowed, MissingHeader, PayloadTooLarge, Rejection}};
 
-use crate::{main::{ApiError, TokenBody}, settings::settings::{delete_user_settings, get_setting, update_setting}};
+use crate::{main::{ApiError, TokenBody}, oauth2::oauth2::validate_client, settings::settings::{delete_user_settings, get_setting, update_setting}};
 
 mod settings;
+mod oauth2;
 
 const MIN_PASSWORD_LEN: usize = 12;
 
@@ -248,6 +249,19 @@ async fn setup_db(sql_pool: &sqlx::MySqlPool) -> Result<(), sqlx::Error> {
          name VARCHAR(30) NOT NULL,
          value VARCHAR(30) NOT NULL,
          PRIMARY KEY(user_id, name)
+        );
+    "#).execute(sql_pool).await?;
+    
+    // OAuth2 apps
+    sqlx::query!(r#"
+        CREATE TABLE IF NOT EXISTS oauth2_apps(
+         client_id BIGINT PRIMARY KEY,
+         client_secret_hash TEXT NOT NULL,
+         public_client BOOL NOT NULL,
+         name VARCHAR(40) NOT NULL,
+         logo_uri TEXT NOT NULL,
+         redirect_uris TEXT NOT NULL,
+         allowed_scopes TEXT NOT NULL
         );
     "#).execute(sql_pool).await?;
     Ok(())
@@ -648,6 +662,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .and(warp::any().map(move || borrowed_pool))
             .and_then(delete_account)
             .recover(handle_api_rejections(&[], "/account/delete requires DELETE"));
+        
+        // OAuth2 Internal Utility Routes
+        let validate_client = warp::path!("oauth2" / "check_client")
+            .and(warp::post())
+            .and(warp::body::content_length_limit(4096))
+            .and(warp::body::json())
+            .and(warp::any().map(move || borrowed_pool))
+            .and_then(validate_client)
+            .recover(handle_api_rejections(&[("client_id", "invalid client_id"), ("redirect_uri", "bad redirect_uri"), ("scopes", "invalid scope(s)")], "/oauth2/check_client requires POST"));
 
         let cors;
         if let Ok(prod_origin) = env::var("PROD_ORIGIN") {
@@ -663,7 +686,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Compile routes into one warp instance to serve
-        let route = warp::any().and(login.or(create_acc).or(add_data).or(get_data).or(update_data).or(list_data).or(delete_data).or(invalidate_sessions).or(update_setting).or(get_setting).or(delete_account)).recover(async |rej: Rejection| -> Result<warp::reply::WithStatus<warp::reply::Json>, warp::Rejection> {
+        let route = warp::any().and(login.or(create_acc).or(add_data).or(get_data).or(update_data).or(list_data).or(delete_data).or(invalidate_sessions).or(update_setting).or(get_setting).or(delete_account).or(validate_client)).recover(async |rej: Rejection| -> Result<warp::reply::WithStatus<warp::reply::Json>, warp::Rejection> {
             if rej.is_not_found() {
                 Ok(warp::reply::with_status(warp::reply::json(&ApiError::from_str("api route not found")), warp::http::StatusCode::NOT_FOUND))
             } else {
